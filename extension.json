@@ -1,0 +1,19 @@
+{
+    "code": "cupnoodles.squaregiftcards",
+    "name": "Square Gift Cards",
+    "description": "Accept Square Gift Cards from Checkout",
+    "version": "v1.0.0",
+    "author": "CupNoodles",
+    "icon": {
+      "class": "fas fa-money-check-alt",
+      "backgroundColor": "#1B294B",
+      "color": "#fff"
+    },
+    "homepage": "",
+    "require": {
+      "igniter.cart" : "*",
+      "igniter.coupons": "*",
+      "igniter.local": "*",
+      "igniter.payregister": "*"
+    }
+  }
