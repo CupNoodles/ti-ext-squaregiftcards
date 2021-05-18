@@ -6,10 +6,11 @@ class SquareGiftCard extends CartCondition
 {
 
     public $priority = 900;
+    public $removeable = true;
 
     public function getLabel()
     {
-        return "Gift Certificate";
+        return "Gift Certificate ($".$this->getMetaData('full_gc_value')." value)";
     }
 
     public function onLoad()

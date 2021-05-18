@@ -3,6 +3,9 @@
 namespace CupNoodles\SquareGiftCards;
 
 use System\Classes\BaseExtension;
+use Igniter\Cart\Classes\CartConditionManager;
+use CupNoodles\SquareGiftCards\Components\SquareGiftCardForm;
+use Event;
 
 class Extension extends BaseExtension
 {
@@ -39,6 +42,37 @@ class Extension extends BaseExtension
      */
     public function boot()
     {
+        
+
+        // This is the actual payment that doesn't get cancelled
+        Event::listen('igniter.checkout.beforePayment', function($order, $data){
+
+            foreach($order->getOrderTotals() as $key=>$ot){
+                if($ot->code == 'squareGiftCard' && $ot->value > 0 && isset($data['square_gc_nonce'])){
+                    $sqgf = new SquareGiftCardForm();
+
+                    $idemp = uniqid();
+                    $fields = [
+                        'idempotency_key' => $idemp,
+                        'amount_money' => [
+                            'amount' => (int)($ot->value * 100),
+                            'currency' => currency()->getUserCurrency()
+                        ],
+                        'note' => 'Payment by Gift Card',
+                        'source_id' => $data['square_gc_nonce'],
+                        'accept_partial_authorization' => true,
+                        'autocomplete' => false // this is a lie, SQ payments api fails if you don't mark autocomplete false on a GC but there is no AUTH/CAPT distinction for gift cards
+                    ];
+                    $payment_response = $sqgf->curl_square_v2_request('payments', $fields);
+                    if(isset($payment_response->errors)){
+                        flash()->alert($payment_response->errors[0]->detail);
+                    }
+                    
+                }
+            }
+
+        });
+
     }
         
     public function registerComponents()

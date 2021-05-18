@@ -29,7 +29,13 @@ class SquareGiftCardForm extends \System\Classes\BaseComponent
     public function initialize()
     {
         $this->cartManager = CartManager::instance();
-
+        // as annoying as this is, GC can only be use though the tokenized webpayments form, which means it can't persist across pageloads in the same session.
+        // remove it if it exits on page load to make sure that a customer who refreshes the page on /checkout does NOT have GC applied (page needs to re-request a nonce and customer neds to re-enter the GC number)
+        $post_data = post();
+        if(!isset($post_data['square_gc_nonce']) || $post_data['square_gc_nonce'] == ''){
+            $this->cartManager->getCart()->removeCondition('squareGiftCard');
+        }
+        
     }
 
     public function defineProperties()
@@ -39,11 +45,14 @@ class SquareGiftCardForm extends \System\Classes\BaseComponent
 
     public function onRun()
     {
-        $endpoint = SquareGiftCardSettings::get('transaction_mode') == 'test' ? 'squareupsandbox' : 'squareup';
-        $this->addJs('https://js.'.$endpoint.'.com/v2/paymentform', 'square-js');
-        $this->addJs('$/cupnoodles/squaregiftcards/assets/js/process.squaregiftcards.js', 'process-square-gc-js');
+        
+        $endpoint = SquareGiftCardSettings::get('transaction_mode') == 'test' ? 'sandbox.' : '';
+        $this->addJs('https://'.$endpoint.'web.squarecdn.com/v1/square.js', 'square-js');
+        //$this->addJs('https://js.'.$endpoint.'.com/v2/paymentform', 'square-js');
+        $this->addJs('$/cupnoodles/squaregiftcards/assets/js/webpaymentssdk.giftcard.js', 'square-gc-js');
         
         $this->prepareVars();
+        
     }
 
     protected function prepareVars()
@@ -54,64 +63,103 @@ class SquareGiftCardForm extends \System\Classes\BaseComponent
         
     }
 
+    // While Omnipay is great, the square-omnipay library seems to not be up to date on squareup's v2 endpoints, and on top of that Square's GC handling leaves a lot to be desired. 
+    // Instead of trying to integrate it into omnipay we're just going to write a curl wrapper here and make calls manually. 
+    // As of writing this, doc reference is at https://developer.squareup.com/reference/square
+    public function curl_square_v2_request($endpoint, $post_data = null){
+
+
+        $url = SquareGiftCardSettings::get('transaction_mode') == 'test' ? 'https://connect.squareupsandbox.com/v2/' : 'https://connect.squareup.com/v2/';
+        try{
+
+            $ch = curl_init();
+
+            curl_setopt($ch, CURLOPT_URL, $url . $endpoint);
+            curl_setopt($ch, CURLOPT_POST, 1);
+            if($post_data){
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($post_data));
+            }
+            curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+                'Authorization:  Bearer ' . (SquareGiftCardSettings::get('transaction_mode') == 'test' ? SquareGiftCardSettings::get('test_access_token') :  SquareGiftCardSettings::get('live_access_token')),
+                'Content-Type: application/json'
+            ));
+
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+            $res = curl_exec($ch);
+            
+            curl_close($ch);
+            return json_decode($res);
+        }
+        catch (Exception $ex) {
+            if (Request::ajax()) throw $ex;
+            else flash()->alert($ex->getMessage());
+        }
+        
+    }
+
     public function onApplySquareGiftCard()
     {
+        
         try {
-
-            $sq = new Square(Payments_model::where('code', 'square')->first());
-
-            $gateway = Omnipay::create('Square');
-
-            $gateway->setTestMode($sq->isTestMode());
-            $gateway->setAppId($sq->getAppId());
-            $gateway->setAccessToken($sq->getAccessToken());
-            $gateway->setLocationId($sq->getLocationId());
-
-
+            
+            // So this suuuuuuucks as of 5-14-2021 Square has no way of querying for a gift card value via API (there is a web form where customers can do so, but its not exposed programatically)
+            // In order to get the GC value, we charge it for $10000, use the server response, and then immediately cancel the transaction
+            
             $post_data = post();
+            $idemp = uniqid();
             $fields = [
-                'idempotencyKey' => uniqid(),
-                'amount' => number_format($this->cartManager->getCart()->total(), 2, '.', ''),
-                'currency' => currency()->getUserCurrency(),
+                'idempotency_key' => $idemp,
+                'amount_money' => [
+                    'amount' => 1000000,
+                    'currency' => currency()->getUserCurrency()
+                ],
                 'note' => 'Payment by Gift Card',
-                'nonce' => $post_data['nonce'],
+                'source_id' => $post_data['nonce'],
                 'accept_partial_authorization' => true,
+                'autocomplete' => false
             ];
+            
+            $authorize_response = $this->curl_square_v2_request('payments', $fields);
 
-
-            $response = $gateway->purchase($fields)->send();
-
-            // TODO you can't test gift cards in sandbox so this is only happy path
-            $data = $response->getData();
-            if($data['status'] == 'error'){ // handle errors
-                throw new ApplicationException($data['detail']);
+            if(isset($authorize_response->errors)){
+                flash()->alert($authorize_response->errors[0]->detail);
             }
-            elseif($data['status'] == 'success'){
-                // partially covered
-                if(true == true){ // something here
-                    $card_amt = 9;
+            
+            // cancelling the payment needs to happen regardeless of whether the auth errored out
+            $cancel_response = $this->curl_square_v2_request('payments/cancel', ['idempotency_key' => $idemp]);
+            if(isset($cancel_response->errors)){
+                flash()->alert($cancel_response->errors[0]->detail);
+            }
 
+            // remove the GC cart condition if it exists (we're going to re-add it in a moment, but need to cart total to be the non-GC applied value)
+            $this->cartManager->getCart()->removeCondition('squareGiftCard');
+
+            if(isset($authorize_response->payment) && $authorize_response->payment->status == 'APPROVED'){
+
+                $gc_amount = $authorize_response->payment->amount_money->amount / 100;
+                
+                if($gc_amount >= $this->cartManager->getCart()->total()){  // GC covers the cost, set it to full order value
+                    
                     $condition = $this->cartManager->applyCondition('squareGiftCard', [
-                        'amount' => $card_amt
+                        'amount' => $this->cartManager->getCart()->total(),
+                        'full_gc_value' => $gc_amount
                     ]);
-
-                }else if(true == true){ // something here
-                    $card_amt = 100000;
-
+                    
+                }
+                else{ // GC does not cover cost - set cart condition to GC value and take another payment
                     $condition = $this->cartManager->applyCondition('squareGiftCard', [
-                        'amount' => $card_amt
+                        'amount' => $gc_amount,
+                        'full_gc_value' => $gc_amount
                     ]);
                 }
-                $this->controller->pageCycle();
-                return $this->fetchPartials();
             }
 
-            
 
-            
-
-
-            
+            $this->controller->pageCycle();
+            return $this->fetchPartials();
+        
+        
         }
         catch (Exception $ex) {
             if (Request::ajax()) throw $ex;
@@ -124,14 +172,15 @@ class SquareGiftCardForm extends \System\Classes\BaseComponent
     {
         $this->prepareVars();
 
-        if($this->hasComponent) // if cupnoodles.pricebyweight is installed, assume we want 
-
         $return_templates = [];
         if($this->hasComponent('cartBox')){ $return_templates['#cart-totals'] = $this->renderPartial('cartBox::totals', ['cart' => $this->cartManager->getCart()]); }
         if($this->hasComponent('cartBoxAlias')){ $return_templates['#cart-totals'] = $this->renderPartial('cartBoxAlias::totals', ['cart' => $this->cartManager->getCart()]); }
-        //if($this->hasComponent('checkout')){ $return_templates['#checkout-totals'] = $this->renderPartial('checkout::totals', ['cart' => $this->cartManager->getCart()]); }
-
+        
+        if($this->hasComponent('checkout')){ $return_templates['#checkout-totals'] = $this->renderPartial('checkout::totals', ['cart' => $this->cartManager->getCart()]); }
         if($this->hasComponent('checkoutByWeight')){ $return_templates['#checkout-totals'] = $this->renderPartial('checkoutByWeight::totals', ['cart' => $this->cartManager->getCart()]); }
+        
+        if($this->hasComponent('checkout')){$return_templates['#checkout-payments'] = $this->renderPartial('checkout::payments'); }
+        if($this->hasComponent('checkoutByWeight')){ $return_templates['#checkout-payments'] = $this->renderPartial('checkoutByWeight::payments');}
         
 
         return $return_templates;
