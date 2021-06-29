@@ -26,13 +26,7 @@ else{
             </div>
             <div id="payment-status-container">
                 </div>
-            <button
-                id="squareGiftCardSubmitButton"
-                type="button"
-                class="btn btn-light"
-                data-replace-loading="fa fa-spinner fa-spin"
-                title="@lang('cupnoodles.squaregiftcards::default.button_apply_gift_card')"
-            ><i class="fa fa-check"></i></button>
+
             <input type="hidden" name="square_gc_nonce"/>
     </div>
 @endif

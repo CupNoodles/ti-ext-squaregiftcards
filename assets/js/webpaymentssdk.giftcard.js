@@ -5,7 +5,16 @@ const locationId = sqinfo.dataset.locationId;
 
 
 async function initializeGiftCard(payments) {
-    const giftCard = await payments.giftCard();
+    const giftCard = await payments.giftCard( {
+      style: {
+        'input': {
+          backgroundColor: '#ebe6e0',
+          color: '#000',
+          fontSize: '16px',
+          fontWeight: 'normal'
+       }
+      }
+    });
     await giftCard.attach(sqgcSelector);
     return giftCard;
 }

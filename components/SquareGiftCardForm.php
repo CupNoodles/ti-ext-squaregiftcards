@@ -179,8 +179,10 @@ class SquareGiftCardForm extends \System\Classes\BaseComponent
         if($this->hasComponent('checkout')){ $return_templates['#checkout-totals'] = $this->renderPartial('checkout::totals', ['cart' => $this->cartManager->getCart()]); }
         if($this->hasComponent('checkoutByWeight')){ $return_templates['#checkout-totals'] = $this->renderPartial('checkoutByWeight::totals', ['cart' => $this->cartManager->getCart()]); }
         
-        if($this->hasComponent('checkout')){$return_templates['#checkout-payments'] = $this->renderPartial('checkout::payments'); }
-        if($this->hasComponent('checkoutByWeight')){ $return_templates['#checkout-payments'] = $this->renderPartial('checkoutByWeight::payments');}
+
+        // use this if you want the payment fields to update after applying a GC (you probably don't, since you might need to continue to take further payments)
+        //if($this->hasComponent('checkout')){$return_templates['#checkout-payments'] = $this->renderPartial('checkout::payments'); }
+        //if($this->hasComponent('checkoutByWeight')){ $return_templates['#checkout-payments'] = $this->renderPartial('checkoutByWeight::payments');}
         
 
         return $return_templates;
