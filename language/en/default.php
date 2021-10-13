@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'label_enable_square_gc' => 'Enable Square Gift Card Payments',
     'text_component_title' => 'Square Gift Card Component',
     'text_component_desc' => 'Displays a form to input the Square Gift Card',
 

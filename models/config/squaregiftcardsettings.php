@@ -18,6 +18,14 @@ return [
             'type' => 'section',
             'comment' => 'lang:cupnoodles.squaregiftcards::default.help_square',
         ],
+        'enable' => [
+            'label' => 'lang:cupnoodles.squaregiftcards::default.label_enable_square_gc',
+            'type' => 'switch',
+            'default' => FALSE,
+            'offText' => 'lang:admin::lang.text_no',
+            'onText' => 'lang:admin::lang.text_yes',
+
+        ],
         'transaction_mode' => [
             'label' => 'lang:cupnoodles.squaregiftcards::default.label_transaction_mode',
             'type' => 'radiotoggle',
